@@ -6,82 +6,175 @@
 </div>
 
 <div class="two-panel">
-  <div class="card">
-    <div class="section-title">Generar regalías por período</div>
-    <p class="text-muted mb-16" style="font-size:12px">
-      Calcula automáticamente las regalías de todos los autores
-      a partir de las ventas del período seleccionado.
-    </p>
-    <form method="POST" action="{{ url_for('royalties_generate') }}">
-      <div class="form-grid mb-16">
-        <div class="form-group">
-          <label>Mes</label>
-          <select name="period_month">
-            {% for m in range(1,13) %}
-            <option value="{{ m }}">{{ m }}</option>
+  <!-- LEFT: forms -->
+  <div>
+    <div class="card mb-16">
+      <div class="section-title">Generar devengado por período</div>
+      <form method="POST" action="{{ url_for('royalties_generate') }}">
+        <div class="form-grid mb-16">
+          <div class="form-group">
+            <label>Mes</label>
+            <select name="period_month">
+              {% for m in range(1,13) %}
+              <option value="{{ m }}">{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Año</label>
+            <input type="number" name="period_year" value="{{ now_year }}" min="2000" max="2100">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Generar</button>
+      </form>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:8px">
+        Calcula regalías a partir de los ingresos del período y las tasas de cada autor.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Registrar pago a autor</div>
+      <form method="POST" action="{{ url_for('royalties_pay') }}">
+        <div class="form-group mb-16">
+          <label>Autor *</label>
+          <select name="author_id" required>
+            <option value="">— Seleccionar —</option>
+            {% for a in authors %}
+            <option value="{{ a.id }}">{{ a.name }}</option>
             {% endfor %}
           </select>
         </div>
-        <div class="form-group">
-          <label>Año</label>
-          <input type="number" name="period_year" value="{{ now_year }}" min="2000" max="2100">
+        <div class="form-grid mb-16">
+          <div class="form-group">
+            <label>Monto *</label>
+            <input type="number" name="amount" step="0.01" min="0.01" required>
+          </div>
+          <div class="form-group">
+            <label>Fecha</label>
+            <input type="date" name="payment_date" id="pay-date">
+          </div>
         </div>
-      </div>
-      <button type="submit" class="btn btn-primary">Generar regalías</button>
-    </form>
+        <div class="form-group mb-16">
+          <label>Notas</label>
+          <input type="text" name="notes" placeholder="Transferencia, cheque…">
+        </div>
+        <button type="submit" class="btn btn-primary">Registrar pago</button>
+      </form>
+    </div>
   </div>
 
+  <!-- RIGHT: summary -->
   <div>
-    <!-- Summary stats -->
-    <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">
-      {% set pending_total = payments | selectattr('status','eq','pending') | sum(attribute='amount') %}
-      {% set paid_total = payments | selectattr('status','eq','paid') | sum(attribute='amount') %}
+    <!-- KPI cards -->
+    <div class="stats-grid mb-16" style="grid-template-columns:repeat(3,1fr)">
       <div class="card stat-card">
-        <div class="card-title">Pendientes</div>
-        <div class="stat-number text-danger">${{ '%.2f'|format(pending_total) }}</div>
+        <div class="card-title">Total devengado</div>
+        <div class="stat-number">${{ '%.2f'|format(total_accrued) }}</div>
       </div>
       <div class="card stat-card">
-        <div class="card-title">Pagadas</div>
-        <div class="stat-number text-success">${{ '%.2f'|format(paid_total) }}</div>
+        <div class="card-title">Total pagado</div>
+        <div class="stat-number text-success">${{ '%.2f'|format(total_paid) }}</div>
+      </div>
+      <div class="card stat-card">
+        <div class="card-title">Saldo pendiente</div>
+        <div class="stat-number {% if total_balance > 0 %}text-danger{% endif %}">
+          ${{ '%.2f'|format(total_balance) }}
+        </div>
       </div>
     </div>
 
-    <!-- Filter -->
-    <div style="margin-bottom:12px">
-      <input type="text" id="filter-input" placeholder="Filtrar por autor o período…" style="max-width:300px">
-    </div>
-
-    {% if payments %}
+    {% if summary %}
     <div class="table-wrapper">
-      <table id="royalties-table">
+      <table>
         <thead>
           <tr>
             <th>Autor</th>
-            <th>Libro</th>
-            <th>Período</th>
-            <th>Monto</th>
-            <th>Estado</th>
-            <th>Pagado el</th>
-            <th>Acciones</th>
+            <th>Devengado</th>
+            <th>Pagado</th>
+            <th>Saldo</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          {% for rp in payments %}
-          <tr id="rp-{{ rp.id }}">
-            <td><a href="{{ url_for('author_detail', author_id=rp.author_id) }}" style="color:var(--primary)">{{ rp.author_name }}</a></td>
-            <td>{{ rp.book_title }}</td>
-            <td>{{ rp.period }}</td>
-            <td>${{ '%.2f'|format(rp.amount) }}</td>
-            <td><span class="badge badge-{{ rp.status }}" id="badge-{{ rp.id }}">{{ rp.status }}</span></td>
-            <td id="paid-at-{{ rp.id }}">{{ rp.paid_at or '—' }}</td>
-            <td style="display:flex;gap:4px">
-              {% if rp.status == 'pending' %}
-              <button class="btn btn-success btn-xs" onclick="markPaid({{ rp.id }})">Marcar pagado</button>
-              {% endif %}
-              <form method="POST" action="{{ url_for('royalties_delete', payment_id=rp.id) }}"
-                    onsubmit="return confirm('¿Eliminar esta regalía?')">
-                <button type="submit" class="btn btn-danger btn-xs">Eliminar</button>
-              </form>
+          {% for s in summary %}
+          <tr>
+            <td><a href="{{ url_for('author_detail', author_id=s.author_id) }}">{{ s.author_name }}</a></td>
+            <td>${{ '%.2f'|format(s.total_accrued) }}</td>
+            <td class="text-success">${{ '%.2f'|format(s.total_paid) }}</td>
+            <td class="{% if s.balance > 0 %}text-danger{% endif %}">${{ '%.2f'|format(s.balance) }}</td>
+            <td>
+              <button class="btn btn-outline btn-xs"
+                      onclick="toggleDetail({{ s.author_id }})">Detalle</button>
+            </td>
+          </tr>
+          <!-- Expandable detail row -->
+          <tr id="detail-{{ s.author_id }}" style="display:none">
+            <td colspan="5" style="padding:0">
+              <div style="padding:12px 16px;background:var(--bg)">
+
+                <!-- Accrual breakdown -->
+                {% if s.accrual_details %}
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted)">
+                  Regalías devengadas por período
+                </div>
+                <table style="font-size:12px;margin-bottom:12px">
+                  <thead>
+                    <tr><th>Período</th><th>Libro</th><th>Monto</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {% for d in s.accrual_details %}
+                    <tr>
+                      <td>{{ d.period }}</td>
+                      <td>{{ d.book_title }}</td>
+                      <td>${{ '%.2f'|format(d.amount) }}</td>
+                      <td>
+                        <form method="POST"
+                              action="{{ url_for('royalties_delete', payment_id=d.id) }}"
+                              onsubmit="return confirm('¿Eliminar esta entrada?')">
+                          <button type="submit" class="btn btn-danger btn-xs">×</button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                {% else %}
+                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                  Sin regalías devengadas registradas.
+                </p>
+                {% endif %}
+
+                <!-- Payment history -->
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted)">
+                  Pagos realizados
+                </div>
+                {% if s.payment_history %}
+                <table style="font-size:12px">
+                  <thead>
+                    <tr><th>Fecha</th><th>Monto</th><th>Notas</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {% for p in s.payment_history %}
+                    <tr>
+                      <td>{{ p.payment_date }}</td>
+                      <td class="text-success">${{ '%.2f'|format(p.amount) }}</td>
+                      <td>{{ p.notes or '—' }}</td>
+                      <td>
+                        <form method="POST"
+                              action="{{ url_for('royalties_payment_delete', payment_id=p.id) }}"
+                              onsubmit="return confirm('¿Eliminar este pago?')">
+                          <button type="submit" class="btn btn-danger btn-xs">×</button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                {% else %}
+                <p style="font-size:12px;color:var(--text-muted)">Sin pagos registrados.</p>
+                {% endif %}
+
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -89,32 +182,22 @@
       </table>
     </div>
     {% else %}
-    <div class="card"><p class="empty-state">No hay regalías generadas todavía. Selecciona un período y haz clic en «Generar regalías».</p></div>
+    <div class="card">
+      <p class="empty-state">
+        No hay regalías generadas todavía.
+        Genera regalías para un período usando el formulario de la izquierda.
+      </p>
+    </div>
     {% endif %}
   </div>
 </div>
 
 <script>
-document.getElementById('filter-input')?.addEventListener('input', function() {
-  const q = this.value.toLowerCase();
-  document.querySelectorAll('#royalties-table tbody tr').forEach(tr => {
-    const text = tr.cells[0].textContent.toLowerCase() + ' ' + tr.cells[2].textContent.toLowerCase();
-    tr.style.display = text.includes(q) ? '' : 'none';
-  });
-});
+document.getElementById('pay-date').value = new Date().toISOString().split('T')[0];
 
-async function markPaid(id) {
-  const res = await fetch(`/royalties/${id}/mark-paid`, {method: 'POST'});
-  if (res.ok) {
-    const badge = document.getElementById('badge-' + id);
-    badge.className = 'badge badge-paid';
-    badge.textContent = 'paid';
-    const row = document.getElementById('rp-' + id);
-    const actionsCell = row.cells[6];
-    const paidBtn = actionsCell.querySelector('button.btn-success');
-    if (paidBtn) paidBtn.remove();
-    document.getElementById('paid-at-' + id).textContent = new Date().toLocaleString();
-  }
+function toggleDetail(authorId) {
+  const row = document.getElementById('detail-' + authorId);
+  row.style.display = row.style.display === 'none' ? '' : 'none';
 }
 </script>
 {% endblock %}

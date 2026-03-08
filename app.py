@@ -65,7 +65,8 @@ def dashboard_stats():
     ).fetchone()[0]
 
     royalties_pending = db.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM royalty_payments WHERE status = 'pending'"
+        '''SELECT COALESCE(SUM(rp.amount), 0) - COALESCE((SELECT SUM(ap.amount) FROM author_payments ap), 0)
+           FROM royalty_payments rp'''
     ).fetchone()[0]
 
     total_books = db.execute('SELECT COUNT(*) FROM books').fetchone()[0]
@@ -333,7 +334,7 @@ def authors():
     authors_list = db.execute(
         '''SELECT a.*,
                   COUNT(DISTINCT ba.book_id) as book_count,
-                  COALESCE(SUM(rp.amount) FILTER (WHERE rp.status='pending'), 0) as pending_royalties
+                  COALESCE(SUM(rp.amount), 0) - COALESCE((SELECT SUM(ap.amount) FROM author_payments ap WHERE ap.author_id = a.id), 0) as pending_royalties
            FROM authors a
            LEFT JOIN book_authors ba ON a.id = ba.author_id
            LEFT JOIN royalty_payments rp ON a.id = rp.author_id
@@ -932,14 +933,65 @@ def expenses_delete(expense_id):
 @app.route('/royalties')
 def royalties():
     db = get_db()
-    payments = db.execute(
-        '''SELECT rp.*, a.name as author_name, b.title as book_title
-           FROM royalty_payments rp
-           JOIN authors a ON rp.author_id = a.id
-           JOIN books b ON rp.book_id = b.id
-           ORDER BY rp.period DESC, a.name'''
+    authors_list = db.execute('SELECT id, name FROM authors ORDER BY name').fetchall()
+
+    # Accrued per author
+    accrued_rows = db.execute(
+        '''SELECT author_id, SUM(amount) as total
+           FROM royalty_payments GROUP BY author_id'''
     ).fetchall()
-    return render_template('royalties.html', payments=payments, now_year=datetime.now().year)
+    accrued_map = {r['author_id']: r['total'] for r in accrued_rows}
+
+    # Paid per author (disbursements)
+    paid_rows = db.execute(
+        '''SELECT author_id, SUM(amount) as total
+           FROM author_payments GROUP BY author_id'''
+    ).fetchall()
+    paid_map = {r['author_id']: r['total'] for r in paid_rows}
+
+    # Accrual detail per author (period breakdown)
+    accrual_details = {}
+    for row in db.execute(
+        '''SELECT rp.author_id, rp.period, b.title as book_title, rp.amount, rp.id
+           FROM royalty_payments rp JOIN books b ON rp.book_id = b.id
+           ORDER BY rp.author_id, rp.period DESC'''
+    ).fetchall():
+        accrual_details.setdefault(row['author_id'], []).append(row)
+
+    # Payment history per author
+    payment_history = {}
+    for row in db.execute(
+        '''SELECT * FROM author_payments ORDER BY author_id, payment_date DESC'''
+    ).fetchall():
+        payment_history.setdefault(row['author_id'], []).append(row)
+
+    # Build author summary — only authors with accruals or payments
+    author_ids = set(accrued_map) | set(paid_map)
+    authors_map = {a['id']: a['name'] for a in authors_list}
+    summary = []
+    for aid in sorted(author_ids, key=lambda x: authors_map.get(x, '')):
+        accrued = accrued_map.get(aid, 0.0)
+        paid = paid_map.get(aid, 0.0)
+        summary.append({
+            'author_id': aid,
+            'author_name': authors_map.get(aid, ''),
+            'total_accrued': accrued,
+            'total_paid': paid,
+            'balance': accrued - paid,
+            'accrual_details': accrual_details.get(aid, []),
+            'payment_history': payment_history.get(aid, []),
+        })
+
+    total_accrued = sum(s['total_accrued'] for s in summary)
+    total_paid = sum(s['total_paid'] for s in summary)
+
+    return render_template('royalties.html',
+                           summary=summary,
+                           authors=authors_list,
+                           total_accrued=total_accrued,
+                           total_paid=total_paid,
+                           total_balance=total_accrued - total_paid,
+                           now_year=datetime.now().year)
 
 
 @app.route('/royalties/generate', methods=['POST'])
@@ -949,7 +1001,7 @@ def royalties_generate():
         period_month = int(request.form.get('period_month', 1))
         period_year = int(request.form.get('period_year', datetime.now().year))
     except ValueError:
-        flash('Invalid period.', 'error')
+        flash('Período inválido.', 'error')
         return redirect(url_for('royalties'))
 
     period_str = f'{period_year:04d}-{period_month:02d}'
@@ -963,17 +1015,15 @@ def royalties_generate():
     ).fetchall()
 
     if not rows:
-        flash(f'No revenue entries found for {period_str}.', 'warning')
+        flash(f'No hay entradas de ingresos para {period_str}.', 'warning')
         return redirect(url_for('royalties'))
 
-    inserted = 0
-    skipped = 0
+    inserted = skipped = 0
     for row in rows:
         amount = round(row['revenue_amount'] * row['royalty_rate'] / 100, 2)
         try:
             db.execute(
-                '''INSERT INTO royalty_payments (author_id, book_id, amount, period)
-                   VALUES (?, ?, ?, ?)''',
+                'INSERT INTO royalty_payments (author_id, book_id, amount, period) VALUES (?, ?, ?, ?)',
                 [row['author_id'], row['book_id'], amount, period_str]
             )
             inserted += 1
@@ -981,19 +1031,8 @@ def royalties_generate():
             skipped += 1
 
     db.commit()
-    flash(f'Royalties generated for {period_str}: {inserted} new, {skipped} already existed.', 'success')
+    flash(f'Regalías generadas para {period_str}: {inserted} nuevas, {skipped} ya existían.', 'success')
     return redirect(url_for('royalties'))
-
-
-@app.route('/royalties/<int:payment_id>/mark-paid', methods=['POST'])
-def royalties_mark_paid(payment_id):
-    db = get_db()
-    db.execute(
-        "UPDATE royalty_payments SET status='paid', paid_at=CURRENT_TIMESTAMP WHERE id=?",
-        [payment_id]
-    )
-    db.commit()
-    return jsonify({'success': True})
 
 
 @app.route('/royalties/<int:payment_id>/delete', methods=['POST'])
@@ -1001,7 +1040,41 @@ def royalties_delete(payment_id):
     db = get_db()
     db.execute('DELETE FROM royalty_payments WHERE id=?', [payment_id])
     db.commit()
-    flash('Royalty payment deleted.', 'success')
+    flash('Entrada de regalía eliminada.', 'success')
+    return redirect(url_for('royalties'))
+
+
+@app.route('/royalties/pay', methods=['POST'])
+def royalties_pay():
+    db = get_db()
+    author_id = request.form.get('author_id')
+    payment_date = request.form.get('payment_date') or date.today().isoformat()
+    notes = request.form.get('notes', '').strip() or None
+    try:
+        amount = float(request.form.get('amount', 0))
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        flash('El monto debe ser un número positivo.', 'error')
+        return redirect(url_for('royalties'))
+    if not author_id:
+        flash('Selecciona un autor.', 'error')
+        return redirect(url_for('royalties'))
+    db.execute(
+        'INSERT INTO author_payments (author_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)',
+        [author_id, amount, payment_date, notes]
+    )
+    db.commit()
+    flash('Pago registrado.', 'success')
+    return redirect(url_for('royalties'))
+
+
+@app.route('/royalties/payment/<int:payment_id>/delete', methods=['POST'])
+def royalties_payment_delete(payment_id):
+    db = get_db()
+    db.execute('DELETE FROM author_payments WHERE id=?', [payment_id])
+    db.commit()
+    flash('Pago eliminado.', 'success')
     return redirect(url_for('royalties'))
 
 
@@ -1048,7 +1121,7 @@ def api_reports():
                   COALESCE(SUM(re.revenue_amount), 0) as total_revenue,
                   COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.book_id = b.id), 0) as total_expenses,
                   COALESCE((SELECT SUM(rp.amount) FROM royalty_payments rp
-                             WHERE rp.book_id = b.id AND rp.status = 'paid'), 0) as royalties_paid
+                             WHERE rp.book_id = b.id), 0) as royalties_paid
            FROM books b
            LEFT JOIN revenue_entries re ON b.id = re.book_id
            GROUP BY b.id, b.title
@@ -1057,8 +1130,8 @@ def api_reports():
 
     royalty_summary = db.execute(
         '''SELECT a.name as author_name,
-                  COALESCE(SUM(rp.amount) FILTER (WHERE rp.status='pending'), 0) as pending,
-                  COALESCE(SUM(rp.amount) FILTER (WHERE rp.status='paid'), 0) as paid
+                  COALESCE(SUM(rp.amount), 0) as accrued,
+                  COALESCE((SELECT SUM(ap.amount) FROM author_payments ap WHERE ap.author_id = a.id), 0) as paid
            FROM authors a
            LEFT JOIN royalty_payments rp ON a.id = rp.author_id
            GROUP BY a.id, a.name
@@ -1092,7 +1165,7 @@ def api_reports():
             for r in book_profitability
         ],
         'royalty_summary': [
-            {'author': r['author_name'], 'pending': round(r['pending'], 2), 'paid': round(r['paid'], 2)}
+            {'author': r['author_name'], 'pending': round(r['accrued'] - r['paid'], 2), 'paid': round(r['paid'], 2)}
             for r in royalty_summary
         ],
         'available_years': [r[0] for r in available_years],

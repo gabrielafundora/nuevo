@@ -117,6 +117,16 @@ CREATE TABLE IF NOT EXISTS royalty_payments (
     FOREIGN KEY (author_id) REFERENCES authors(id),
     FOREIGN KEY (book_id) REFERENCES books(id)
 );
+
+CREATE TABLE IF NOT EXISTS author_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_date DATE NOT NULL DEFAULT (date('now')),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (author_id) REFERENCES authors(id)
+);
 """
 
 SEED_CATEGORIES = [
