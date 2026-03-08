@@ -7,28 +7,47 @@
 
 <div class="two-panel">
   <div class="card">
-    <div class="section-title">Subir reporte CSV de KDP</div>
+    <div class="section-title">Subir reporte de KDP</div>
     <div class="card" style="background:#fffbeb;border-color:#fde68a;margin-bottom:16px">
-      <strong style="font-size:13px">ℹ️ ¿Cómo obtener el CSV?</strong>
+      <strong style="font-size:13px">ℹ️ ¿Cómo obtener el archivo?</strong>
       <ol style="font-size:12px;margin-top:8px;padding-left:16px;line-height:1.8">
         <li>Ingresa a <strong>kdpreports.amazon.com</strong></li>
-        <li>Selecciona «Sales &amp; Royalties»</li>
-        <li>Filtra por marketplace, período, etc.</li>
-        <li>Haz clic en <strong>Download report</strong></li>
-        <li>Sube el archivo .csv aquí</li>
+        <li>Selecciona «Ventas y regalías» (o «Sales &amp; Royalties»)</li>
+        <li>Filtra por período</li>
+        <li>Haz clic en <strong>Descargar reporte</strong></li>
+        <li>Sube el archivo .xlsx o .csv aquí</li>
       </ol>
     </div>
 
     <form method="POST" action="{{ url_for('import_kdp') }}" enctype="multipart/form-data">
       <div class="form-group mb-16">
-        <label>Archivo CSV (.csv, máx 5 MB)</label>
-        <input type="file" name="csv_file" accept=".csv" required>
+        <label>Archivo CSV o Excel (.csv / .xlsx, máx 5 MB)</label>
+        <input type="file" name="csv_file" accept=".csv,.xlsx" required>
       </div>
       <button type="submit" class="btn btn-primary">Importar</button>
     </form>
 
     <div style="margin-top:24px">
-      <div class="section-title">Columnas esperadas del CSV</div>
+      <div class="section-title">Formato Excel (interfaz en español)</div>
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
+        Pestaña «ingresos totales» — columnas detectadas automáticamente.
+      </p>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Columna en el Excel</th><th>Campo en el sistema</th></tr></thead>
+          <tbody>
+            <tr><td>Periodo de ventas</td><td>Período (mes/año)</td></tr>
+            <tr><td>Título</td><td>Título del libro</td></tr>
+            <tr><td>Autor</td><td>Nombre del autor</td></tr>
+            <tr><td>ASIN/ISBN</td><td>ISBN / identificador</td></tr>
+            <tr><td>Plan de pago</td><td>Formato (digital / físico)</td></tr>
+            <tr><td>Unidades netas vendidas o KENP leídas</td><td>Unidades vendidas</td></tr>
+            <tr><td>Ingresos</td><td>Ingreso por regalía</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title" style="margin-top:20px">Formato CSV (interfaz en inglés)</div>
       <div class="table-wrapper">
         <table>
           <thead><tr><th>Columna KDP</th><th>Campo en el sistema</th></tr></thead>
@@ -44,6 +63,7 @@
       </div>
       <p class="text-muted" style="font-size:11px;margin-top:8px">
         Los libros y autores nuevos se crean automáticamente.
+        Las ventas de varias tiendas Amazon se agrupan en una sola entrada por libro/período.
         Las entradas duplicadas se omiten sin error.
       </p>
     </div>
@@ -90,11 +110,13 @@
       <p style="font-size:13px;line-height:1.7;color:var(--text-muted)">
         Amazon KDP <strong>no ofrece una API pública</strong> para acceder a datos de ventas
         directamente. La única forma oficial y compatible con los términos de servicio es
-        descargar los reportes CSV desde el panel de KDP e importarlos aquí.
+        descargar los reportes desde el panel de KDP e importarlos aquí.
       </p>
       <p style="font-size:13px;line-height:1.7;color:var(--text-muted);margin-top:12px">
+        Se aceptan tanto el formato <strong>Excel (.xlsx)</strong> descargado desde la interfaz
+        en español como el formato <strong>CSV</strong> de la interfaz en inglés.
         Una vez importados, los datos se integran con el catálogo, el inventario
-        digital y el sistema de regalías automáticamente.
+        y el sistema de regalías automáticamente.
       </p>
     </div>
     {% endif %}

@@ -1,6 +1,8 @@
 import csv
 import io
 import sqlite3
+
+import openpyxl
 from datetime import datetime, date
 
 from flask import (
@@ -901,13 +903,16 @@ def import_kdp():
         return render_template('import_kdp.html')
 
     file = request.files.get('csv_file')
-    if not file or not file.filename.endswith('.csv'):
-        flash('Please upload a valid .csv file.', 'error')
+    fname = file.filename if file else ''
+    is_xlsx = fname.lower().endswith('.xlsx')
+    is_csv = fname.lower().endswith('.csv')
+    if not file or (not is_csv and not is_xlsx):
+        flash('Por favor sube un archivo .csv o .xlsx válido.', 'error')
         return redirect(url_for('import_kdp'))
 
     content = file.read()
     if len(content) > 5 * 1024 * 1024:
-        flash('File too large (max 5 MB).', 'error')
+        flash('Archivo demasiado grande (máx 5 MB).', 'error')
         return redirect(url_for('import_kdp'))
 
     db = get_db()
@@ -924,126 +929,251 @@ def import_kdp():
     else:
         kdp_pub_id = kdp_pub['id']
 
-    try:
-        text = content.decode('utf-8-sig')
-    except UnicodeDecodeError:
-        text = content.decode('latin-1')
-
-    reader = csv.DictReader(io.StringIO(text))
-    # Normalize column names
-    rows = [{k.strip(): v.strip() for k, v in row.items()} for row in reader]
-
     processed = 0
     imported = 0
     skipped = 0
     errors = []
 
-    for i, row in enumerate(rows, 1):
+    if is_xlsx:
+        # --- Excel format (Amazon KDP Spanish UI) ---
         try:
-            title = row.get('Title', '').strip()
-            author_name = row.get('Author', '').strip()
-            asin = row.get('ASIN', '').strip() or None
-            transaction_month = row.get('Transaction Month', '').strip()
-            units_str = row.get('Net Units Sold', row.get('Units Sold', '0')).strip()
-            royalty_str = row.get('Royalty', '0').strip()
+            period_month, period_year, excel_rows = _parse_kdp_excel(content)
+        except ValueError as e:
+            flash(str(e), 'error')
+            return redirect(url_for('import_kdp'))
 
-            if not title or not transaction_month:
-                skipped += 1
-                continue
-
-            # Parse period: "January 2025" or "2025-01" or "01/2025"
-            period_month, period_year = _parse_kdp_period(transaction_month)
-            if not period_month:
-                errors.append(f'Row {i}: Cannot parse period "{transaction_month}"')
-                skipped += 1
-                continue
-
+        for i, row in enumerate(excel_rows, 1):
             try:
-                units_sold = int(float(units_str or 0))
-                revenue_amount = float(royalty_str.replace('$', '').replace(',', '') or 0)
-            except ValueError:
-                errors.append(f'Row {i}: Invalid numeric values')
-                skipped += 1
-                continue
+                title = row['title']
+                author_name = row['author']
+                isbn = row['isbn']
+                plan_pago = row['plan_pago']
+                units_str = row['units_str']
+                ingresos_str = row['ingresos_str']
 
-            processed += 1
+                if not title:
+                    skipped += 1
+                    continue
 
-            # Find or create author
-            author_id = None
-            if author_name:
-                author = db.execute(
-                    'SELECT id FROM authors WHERE name=?', [author_name]
-                ).fetchone()
-                if author:
-                    author_id = author['id']
+                # Determine format from plan de pago
+                plan_lower = plan_pago.lower()
+                if 'tapa blanda' in plan_lower:
+                    entry_format = 'physical'
                 else:
-                    cur = db.execute(
-                        'INSERT INTO authors (name) VALUES (?)', [author_name]
-                    )
-                    author_id = cur.lastrowid
+                    entry_format = 'digital'
 
-            # Find or create book
-            book = db.execute(
-                'SELECT id FROM books WHERE title=? AND publisher_id=?',
-                [title, kdp_pub_id]
-            ).fetchone()
-            if book:
-                book_id = book['id']
-            else:
-                isbn = asin or None
+                # For KENP, units are pages (not unit sales) — store as 0
+                is_kenp = 'kenp' in plan_lower or 'páginas' in plan_lower
                 try:
-                    cur = db.execute(
-                        '''INSERT INTO books (title, publisher_id, isbn, format)
-                           VALUES (?, ?, ?, 'digital')''',
-                        [title, kdp_pub_id, isbn]
+                    units_sold = 0 if is_kenp else int(float(units_str or 0))
+                    revenue_amount = float(
+                        str(ingresos_str).replace('$', '').replace(',', '') or 0
                     )
-                    book_id = cur.lastrowid
+                except ValueError:
+                    errors.append(f'Fila {i}: Valores numéricos inválidos')
+                    skipped += 1
+                    continue
+
+                processed += 1
+
+                # Find or create author
+                author_id = None
+                if author_name:
+                    author = db.execute(
+                        'SELECT id FROM authors WHERE name=?', [author_name]
+                    ).fetchone()
+                    if author:
+                        author_id = author['id']
+                    else:
+                        cur = db.execute(
+                            'INSERT INTO authors (name) VALUES (?)', [author_name]
+                        )
+                        author_id = cur.lastrowid
+
+                # Determine book format for creation
+                if entry_format == 'physical':
+                    book_fmt = 'physical'
+                else:
+                    book_fmt = 'digital'
+
+                # Find or create book
+                book = db.execute(
+                    'SELECT id FROM books WHERE title=? AND publisher_id=?',
+                    [title, kdp_pub_id]
+                ).fetchone()
+                if book:
+                    book_id = book['id']
+                else:
+                    try:
+                        cur = db.execute(
+                            'INSERT INTO books (title, publisher_id, isbn, format) VALUES (?, ?, ?, ?)',
+                            [title, kdp_pub_id, isbn, book_fmt]
+                        )
+                        book_id = cur.lastrowid
+                        db.execute(
+                            'INSERT OR IGNORE INTO inventory (book_id) VALUES (?)', [book_id]
+                        )
+                    except sqlite3.IntegrityError:
+                        book = db.execute(
+                            'SELECT id FROM books WHERE isbn=?', [isbn]
+                        ).fetchone()
+                        book_id = book['id'] if book else None
+                        if not book_id:
+                            skipped += 1
+                            continue
+
+                # Link author to book
+                if author_id:
                     db.execute(
-                        'INSERT OR IGNORE INTO inventory (book_id) VALUES (?)', [book_id]
+                        'INSERT OR IGNORE INTO book_authors (book_id, author_id) VALUES (?, ?)',
+                        [book_id, author_id]
                     )
-                except sqlite3.IntegrityError:
-                    # ISBN conflict — find by ASIN
-                    book = db.execute('SELECT id FROM books WHERE isbn=?', [isbn]).fetchone()
-                    book_id = book['id'] if book else None
-                    if not book_id:
-                        skipped += 1
-                        continue
 
-            # Link author to book if needed
-            if author_id:
-                db.execute(
-                    'INSERT OR IGNORE INTO book_authors (book_id, author_id) VALUES (?, ?)',
-                    [book_id, author_id]
-                )
-
-            # Insert revenue entry
-            try:
+                # Upsert revenue entry — aggregate multiple stores into one row
                 db.execute(
                     '''INSERT INTO revenue_entries
                        (book_id, channel, period_month, period_year, units_sold, revenue_amount, format)
-                       VALUES (?, 'kdp', ?, ?, ?, ?, 'digital')''',
-                    [book_id, period_month, period_year, units_sold, revenue_amount]
+                       VALUES (?, 'kdp', ?, ?, ?, ?, ?)
+                       ON CONFLICT(book_id, channel, format, period_month, period_year) DO UPDATE SET
+                         units_sold = units_sold + excluded.units_sold,
+                         revenue_amount = revenue_amount + excluded.revenue_amount''',
+                    [book_id, period_month, period_year, units_sold, revenue_amount, entry_format]
                 )
-                # Update digital inventory
-                db.execute(
-                    '''INSERT INTO inventory (book_id, units_digital_sold)
-                       VALUES (?, ?)
-                       ON CONFLICT(book_id) DO UPDATE SET
-                         units_digital_sold = units_digital_sold + excluded.units_digital_sold,
-                         updated_at = CURRENT_TIMESTAMP''',
-                    [book_id, units_sold]
-                )
+
+                # Update inventory
+                if entry_format == 'physical':
+                    db.execute(
+                        '''INSERT INTO inventory (book_id, units_physical_sold)
+                           VALUES (?, ?)
+                           ON CONFLICT(book_id) DO UPDATE SET
+                             units_physical_sold = units_physical_sold + excluded.units_physical_sold,
+                             updated_at = CURRENT_TIMESTAMP''',
+                        [book_id, units_sold]
+                    )
+                else:
+                    db.execute(
+                        '''INSERT INTO inventory (book_id, units_digital_sold)
+                           VALUES (?, ?)
+                           ON CONFLICT(book_id) DO UPDATE SET
+                             units_digital_sold = units_digital_sold + excluded.units_digital_sold,
+                             updated_at = CURRENT_TIMESTAMP''',
+                        [book_id, units_sold]
+                    )
                 imported += 1
-            except sqlite3.IntegrityError:
+
+            except Exception as e:
+                errors.append(f'Fila {i}: Error inesperado - {str(e)}')
                 skipped += 1
 
-        except Exception as e:
-            errors.append(f'Row {i}: Unexpected error - {str(e)}')
-            skipped += 1
+    else:
+        # --- CSV format (Amazon KDP English UI, legacy) ---
+        try:
+            text = content.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            text = content.decode('latin-1')
+
+        reader = csv.DictReader(io.StringIO(text))
+        rows = [{k.strip(): v.strip() for k, v in row.items()} for row in reader]
+
+        for i, row in enumerate(rows, 1):
+            try:
+                title = row.get('Title', '').strip()
+                author_name = row.get('Author', '').strip()
+                asin = row.get('ASIN', '').strip() or None
+                transaction_month = row.get('Transaction Month', '').strip()
+                units_str = row.get('Net Units Sold', row.get('Units Sold', '0')).strip()
+                royalty_str = row.get('Royalty', '0').strip()
+
+                if not title or not transaction_month:
+                    skipped += 1
+                    continue
+
+                period_month, period_year = _parse_kdp_period(transaction_month)
+                if not period_month:
+                    errors.append(f'Row {i}: Cannot parse period "{transaction_month}"')
+                    skipped += 1
+                    continue
+
+                try:
+                    units_sold = int(float(units_str or 0))
+                    revenue_amount = float(royalty_str.replace('$', '').replace(',', '') or 0)
+                except ValueError:
+                    errors.append(f'Row {i}: Invalid numeric values')
+                    skipped += 1
+                    continue
+
+                processed += 1
+
+                author_id = None
+                if author_name:
+                    author = db.execute(
+                        'SELECT id FROM authors WHERE name=?', [author_name]
+                    ).fetchone()
+                    if author:
+                        author_id = author['id']
+                    else:
+                        cur = db.execute(
+                            'INSERT INTO authors (name) VALUES (?)', [author_name]
+                        )
+                        author_id = cur.lastrowid
+
+                book = db.execute(
+                    'SELECT id FROM books WHERE title=? AND publisher_id=?',
+                    [title, kdp_pub_id]
+                ).fetchone()
+                if book:
+                    book_id = book['id']
+                else:
+                    isbn = asin or None
+                    try:
+                        cur = db.execute(
+                            '''INSERT INTO books (title, publisher_id, isbn, format)
+                               VALUES (?, ?, ?, 'digital')''',
+                            [title, kdp_pub_id, isbn]
+                        )
+                        book_id = cur.lastrowid
+                        db.execute(
+                            'INSERT OR IGNORE INTO inventory (book_id) VALUES (?)', [book_id]
+                        )
+                    except sqlite3.IntegrityError:
+                        book = db.execute('SELECT id FROM books WHERE isbn=?', [isbn]).fetchone()
+                        book_id = book['id'] if book else None
+                        if not book_id:
+                            skipped += 1
+                            continue
+
+                if author_id:
+                    db.execute(
+                        'INSERT OR IGNORE INTO book_authors (book_id, author_id) VALUES (?, ?)',
+                        [book_id, author_id]
+                    )
+
+                try:
+                    db.execute(
+                        '''INSERT INTO revenue_entries
+                           (book_id, channel, period_month, period_year, units_sold, revenue_amount, format)
+                           VALUES (?, 'kdp', ?, ?, ?, ?, 'digital')''',
+                        [book_id, period_month, period_year, units_sold, revenue_amount]
+                    )
+                    db.execute(
+                        '''INSERT INTO inventory (book_id, units_digital_sold)
+                           VALUES (?, ?)
+                           ON CONFLICT(book_id) DO UPDATE SET
+                             units_digital_sold = units_digital_sold + excluded.units_digital_sold,
+                             updated_at = CURRENT_TIMESTAMP''',
+                        [book_id, units_sold]
+                    )
+                    imported += 1
+                except sqlite3.IntegrityError:
+                    skipped += 1
+
+            except Exception as e:
+                errors.append(f'Row {i}: Unexpected error - {str(e)}')
+                skipped += 1
 
     db.commit()
 
-    flash(f'Import complete: {processed} rows processed, {imported} imported, {skipped} skipped.', 'success')
+    flash(f'Importación completa: {processed} filas procesadas, {imported} importadas, {skipped} omitidas.', 'success')
     return render_template('import_kdp.html',
                            result={'processed': processed, 'imported': imported, 'skipped': skipped},
                            errors=errors)
@@ -1076,6 +1206,97 @@ def _parse_kdp_period(s):
     if m:
         return int(m.group(1)), int(m.group(2))
     return None, None
+
+
+def _parse_kdp_excel(content):
+    """Parse an Amazon KDP Excel file (Spanish UI format).
+
+    Returns (period_month, period_year, rows) where rows is a list of dicts with keys:
+    title, author, isbn, plan_pago, units_netas, ingresos.
+    Raises ValueError if the period or header row cannot be found.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    # Use the last sheet (usually "ingresos totales")
+    ws = wb.worksheets[-1]
+
+    period_month = None
+    period_year = None
+    header_row_idx = None
+    col_map = {}  # column name → column index (0-based)
+
+    all_rows = list(ws.iter_rows(values_only=True))
+
+    for row_idx, row in enumerate(all_rows):
+        row_vals = [str(c).strip() if c is not None else '' for c in row]
+
+        # Detect period row: first cell contains "Periodo de ventas"
+        if period_month is None:
+            for ci, val in enumerate(row_vals):
+                if 'periodo de ventas' in val.lower():
+                    # Period value is in the next non-empty cell on the same row
+                    for cv in row_vals[ci + 1:]:
+                        if cv:
+                            period_month, period_year = _parse_kdp_period(cv)
+                            break
+                    break
+
+        # Detect header row: contains "Título"
+        if header_row_idx is None:
+            for ci, val in enumerate(row_vals):
+                if val.lower() in ('título', 'titulo'):
+                    header_row_idx = row_idx
+                    for j, h in enumerate(row_vals):
+                        col_map[h.lower()] = j
+                    break
+
+        if period_month and header_row_idx is not None:
+            break
+
+    if not period_month:
+        raise ValueError('No se encontró "Periodo de ventas" en el archivo Excel.')
+    if header_row_idx is None:
+        raise ValueError('No se encontró la fila de encabezados (Título, Autor…) en el archivo Excel.')
+
+    # Helper to find a column index by partial name match
+    def _col(keywords):
+        for key in keywords:
+            for h, idx in col_map.items():
+                if key in h:
+                    return idx
+        return None
+
+    idx_title = _col(['título', 'titulo'])
+    idx_author = _col(['autor'])
+    idx_isbn = _col(['asin', 'isbn'])
+    idx_plan = _col(['plan de pago', 'plan'])
+    idx_units = _col(['unidades netas', 'kenp'])
+    idx_ingresos = _col(['ingresos'])
+
+    rows = []
+    for row in all_rows[header_row_idx + 1:]:
+        row_vals = [str(c).strip() if c is not None else '' for c in row]
+        # Skip empty rows
+        if not any(row_vals):
+            continue
+        title = row_vals[idx_title] if idx_title is not None else ''
+        if not title or title.lower() in ('none', ''):
+            continue
+        author = row_vals[idx_author] if idx_author is not None else ''
+        isbn = row_vals[idx_isbn] if idx_isbn is not None else ''
+        plan = row_vals[idx_plan] if idx_plan is not None else ''
+        units_str = row_vals[idx_units] if idx_units is not None else '0'
+        ingresos_str = row_vals[idx_ingresos] if idx_ingresos is not None else '0'
+
+        rows.append({
+            'title': title,
+            'author': author.strip(),
+            'isbn': isbn if isbn not in ('', 'None', 'N/A') else None,
+            'plan_pago': plan,
+            'units_str': units_str,
+            'ingresos_str': ingresos_str,
+        })
+
+    return period_month, period_year, rows
 
 
 # ---------------------------------------------------------------------------
