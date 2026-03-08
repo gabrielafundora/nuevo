@@ -61,6 +61,44 @@
       </div>
       <button type="submit" class="btn btn-primary">Registrar</button>
     </form>
+
+    <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px">
+      <div class="section-title">Importar CSV masivo</div>
+      <form method="POST" action="{{ url_for('revenue_import') }}" enctype="multipart/form-data">
+        <div class="form-group mb-16">
+          <label>Archivo CSV (máx 5 MB)</label>
+          <input type="file" name="csv_file" accept=".csv" required>
+        </div>
+        <button type="submit" class="btn btn-outline">Importar</button>
+      </form>
+      <div class="table-wrapper" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Columna</th><th>Requerido</th><th>Notas</th></tr></thead>
+          <tbody>
+            <tr><td><code>libro</code></td><td>Sí</td><td>Título exacto del libro</td></tr>
+            <tr><td><code>canal</code></td><td>No</td><td>direct / kdp / distributor (default: direct)</td></tr>
+            <tr><td><code>formato</code></td><td>No</td><td>digital / physical (default: digital)</td></tr>
+            <tr><td><code>mes</code></td><td>Sí</td><td>Número 1–12</td></tr>
+            <tr><td><code>año</code></td><td>Sí</td><td>YYYY</td></tr>
+            <tr><td><code>unidades</code></td><td>No</td><td>Entero ≥ 0 (default: 0)</td></tr>
+            <tr><td><code>ingreso</code></td><td>Sí</td><td>Decimal ≥ 0</td></tr>
+          </tbody>
+        </table>
+      </div>
+      {% if import_result %}
+      <div style="margin-top:12px;font-size:13px">
+        <strong>Resultado:</strong>
+        {{ import_result.processed }} procesadas,
+        <span class="text-success">{{ import_result.imported }} importadas</span>,
+        <span class="text-muted">{{ import_result.skipped }} omitidas</span>
+      </div>
+      {% if import_errors %}
+      <ul style="font-size:12px;padding-left:16px;margin-top:6px;color:var(--danger)">
+        {% for e in import_errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% endif %}
+    </div>
   </div>
 
   <div>

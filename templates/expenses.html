@@ -41,6 +41,46 @@
       </div>
       <button type="submit" class="btn btn-primary">Registrar gasto</button>
     </form>
+
+    <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px">
+      <div class="section-title">Importar CSV masivo</div>
+      <form method="POST" action="{{ url_for('expenses_import') }}" enctype="multipart/form-data">
+        <div class="form-group mb-16">
+          <label>Archivo CSV (máx 5 MB)</label>
+          <input type="file" name="csv_file" accept=".csv" required>
+        </div>
+        <button type="submit" class="btn btn-outline">Importar</button>
+      </form>
+      <div class="table-wrapper" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Columna</th><th>Requerido</th><th>Notas</th></tr></thead>
+          <tbody>
+            <tr><td><code>categoria</code></td><td>Sí</td><td>Nombre exacto de categoría</td></tr>
+            <tr><td><code>monto</code></td><td>Sí</td><td>Decimal &gt; 0</td></tr>
+            <tr><td><code>fecha</code></td><td>No</td><td>YYYY-MM-DD (default: hoy)</td></tr>
+            <tr><td><code>libro</code></td><td>No</td><td>Título del libro (opcional)</td></tr>
+            <tr><td><code>descripcion</code></td><td>No</td><td>Texto libre</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">
+        Categorías disponibles:
+        {% for c in categories %}<code>{{ c.name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      </div>
+      {% if import_result %}
+      <div style="margin-top:12px;font-size:13px">
+        <strong>Resultado:</strong>
+        {{ import_result.processed }} procesadas,
+        <span class="text-success">{{ import_result.imported }} importadas</span>,
+        <span class="text-muted">{{ import_result.skipped }} omitidas</span>
+      </div>
+      {% if import_errors %}
+      <ul style="font-size:12px;padding-left:16px;margin-top:6px;color:var(--danger)">
+        {% for e in import_errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% endif %}
+    </div>
   </div>
 
   <div>

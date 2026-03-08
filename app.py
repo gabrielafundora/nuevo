@@ -645,6 +645,116 @@ def revenue_delete(entry_id):
     return redirect(url_for('revenue'))
 
 
+@app.route('/revenue/import', methods=['POST'])
+def revenue_import():
+    file = request.files.get('csv_file')
+    if not file or not file.filename.lower().endswith('.csv'):
+        flash('Por favor sube un archivo .csv válido.', 'error')
+        return redirect(url_for('revenue'))
+
+    content = file.read()
+    if len(content) > 5 * 1024 * 1024:
+        flash('Archivo demasiado grande (máx 5 MB).', 'error')
+        return redirect(url_for('revenue'))
+
+    try:
+        text = content.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        text = content.decode('latin-1')
+
+    reader = csv.DictReader(io.StringIO(text))
+    rows = [{k.strip().lower(): v.strip() for k, v in row.items()} for row in reader]
+
+    db = get_db()
+    processed = imported = skipped = 0
+    errors = []
+
+    for i, row in enumerate(rows, 1):
+        try:
+            title = row.get('libro', '').strip()
+            if not title:
+                skipped += 1
+                continue
+
+            book = db.execute('SELECT id FROM books WHERE title=?', [title]).fetchone()
+            if not book:
+                errors.append(f'Fila {i}: Libro "{title}" no encontrado en catálogo')
+                skipped += 1
+                continue
+            book_id = book['id']
+
+            channel = row.get('canal', 'direct').strip() or 'direct'
+            fmt = row.get('formato', 'digital').strip() or 'digital'
+
+            mes_str = row.get('mes', '').strip()
+            año_str = row.get('año', '').strip()
+            if not mes_str or not año_str:
+                errors.append(f'Fila {i}: Falta mes o año')
+                skipped += 1
+                continue
+
+            period_month = int(float(mes_str))
+            period_year = int(float(año_str))
+            units_sold = int(float(row.get('unidades', '0') or 0))
+            revenue_amount = float(
+                str(row.get('ingreso', '0') or 0).replace('$', '').replace(',', '')
+            )
+
+            processed += 1
+
+            try:
+                db.execute(
+                    '''INSERT INTO revenue_entries
+                       (book_id, channel, period_month, period_year, units_sold, revenue_amount, format)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    [book_id, channel, period_month, period_year, units_sold, revenue_amount, fmt]
+                )
+                if fmt == 'digital':
+                    db.execute(
+                        '''INSERT INTO inventory (book_id, units_digital_sold) VALUES (?, ?)
+                           ON CONFLICT(book_id) DO UPDATE SET
+                             units_digital_sold = units_digital_sold + excluded.units_digital_sold,
+                             updated_at = CURRENT_TIMESTAMP''',
+                        [book_id, units_sold]
+                    )
+                else:
+                    db.execute(
+                        '''INSERT INTO inventory (book_id, units_physical_sold, units_physical_in_stock)
+                           VALUES (?, ?, 0)
+                           ON CONFLICT(book_id) DO UPDATE SET
+                             units_physical_sold = units_physical_sold + excluded.units_physical_sold,
+                             units_physical_in_stock = MAX(0, units_physical_in_stock - excluded.units_physical_sold),
+                             updated_at = CURRENT_TIMESTAMP''',
+                        [book_id, units_sold]
+                    )
+                imported += 1
+            except sqlite3.IntegrityError:
+                skipped += 1
+
+        except (ValueError, TypeError) as e:
+            errors.append(f'Fila {i}: Valores inválidos — {e}')
+            skipped += 1
+
+    db.commit()
+
+    msg = f'Importación completa: {processed} filas procesadas, {imported} importadas, {skipped} omitidas.'
+    if errors:
+        msg += f' ({len(errors)} advertencias)'
+    flash(msg, 'success')
+
+    books = db.execute('SELECT id, title FROM books ORDER BY title').fetchall()
+    entries = db.execute(
+        '''SELECT re.*, b.title as book_title
+           FROM revenue_entries re JOIN books b ON re.book_id = b.id
+           ORDER BY re.period_year DESC, re.period_month DESC, b.title'''
+    ).fetchall()
+    return render_template('revenue.html', entries=entries, books=books,
+                           now_year=datetime.now().year,
+                           import_result={'processed': processed, 'imported': imported,
+                                          'skipped': skipped},
+                           import_errors=errors)
+
+
 # ---------------------------------------------------------------------------
 # Expenses
 # ---------------------------------------------------------------------------
@@ -689,6 +799,102 @@ def expenses_new():
     db.commit()
     flash('Expense recorded.', 'success')
     return redirect(url_for('expenses'))
+
+
+@app.route('/expenses/import', methods=['POST'])
+def expenses_import():
+    file = request.files.get('csv_file')
+    if not file or not file.filename.lower().endswith('.csv'):
+        flash('Por favor sube un archivo .csv válido.', 'error')
+        return redirect(url_for('expenses'))
+
+    content = file.read()
+    if len(content) > 5 * 1024 * 1024:
+        flash('Archivo demasiado grande (máx 5 MB).', 'error')
+        return redirect(url_for('expenses'))
+
+    try:
+        text = content.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        text = content.decode('latin-1')
+
+    reader = csv.DictReader(io.StringIO(text))
+    rows = [{k.strip().lower(): v.strip() for k, v in row.items()} for row in reader]
+
+    db = get_db()
+    # Build lookup maps (case-insensitive)
+    categories = {r['name'].lower(): r['id']
+                  for r in db.execute('SELECT id, name FROM expense_categories').fetchall()}
+    books_map = {r['title'].lower(): r['id']
+                 for r in db.execute('SELECT id, title FROM books').fetchall()}
+
+    processed = imported = skipped = 0
+    errors = []
+
+    for i, row in enumerate(rows, 1):
+        try:
+            cat_name = row.get('categoria', '').strip()
+            if not cat_name:
+                errors.append(f'Fila {i}: Falta categoría')
+                skipped += 1
+                continue
+
+            category_id = categories.get(cat_name.lower())
+            if not category_id:
+                errors.append(f'Fila {i}: Categoría "{cat_name}" no encontrada')
+                skipped += 1
+                continue
+
+            monto_str = row.get('monto', '').strip()
+            if not monto_str:
+                errors.append(f'Fila {i}: Falta monto')
+                skipped += 1
+                continue
+
+            amount = float(monto_str.replace('$', '').replace(',', ''))
+            if amount <= 0:
+                errors.append(f'Fila {i}: El monto debe ser positivo')
+                skipped += 1
+                continue
+
+            book_title = row.get('libro', '').strip()
+            book_id = books_map.get(book_title.lower()) if book_title else None
+
+            description = row.get('descripcion', '').strip() or None
+            expense_date = row.get('fecha', '').strip() or date.today().isoformat()
+
+            processed += 1
+            db.execute(
+                'INSERT INTO expenses (book_id, category_id, amount, description, expense_date) VALUES (?, ?, ?, ?, ?)',
+                [book_id, category_id, amount, description, expense_date]
+            )
+            imported += 1
+
+        except (ValueError, TypeError) as e:
+            errors.append(f'Fila {i}: Valores inválidos — {e}')
+            skipped += 1
+
+    db.commit()
+
+    msg = f'Importación completa: {processed} filas procesadas, {imported} importadas, {skipped} omitidas.'
+    if errors:
+        msg += f' ({len(errors)} advertencias)'
+    flash(msg, 'success')
+
+    entries = db.execute(
+        '''SELECT e.*, ec.name as category_name, b.title as book_title
+           FROM expenses e
+           JOIN expense_categories ec ON e.category_id = ec.id
+           LEFT JOIN books b ON e.book_id = b.id
+           ORDER BY e.expense_date DESC'''
+    ).fetchall()
+    cats = db.execute('SELECT * FROM expense_categories ORDER BY name').fetchall()
+    all_books = db.execute('SELECT id, title FROM books ORDER BY title').fetchall()
+    return render_template('expenses.html', entries=entries, categories=cats, books=all_books,
+                           today=date.today().isoformat(),
+                           import_result={'processed': processed, 'imported': imported,
+                                          'skipped': skipped},
+                           import_errors=errors)
 
 
 @app.route('/expenses/<int:expense_id>/edit', methods=['POST'])
