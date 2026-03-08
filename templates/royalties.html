@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Regalías — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Regalías</h1>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Generar regalías por período</div>
+    <p class="text-muted mb-16" style="font-size:12px">
+      Calcula automáticamente las regalías de todos los autores
+      a partir de las ventas del período seleccionado.
+    </p>
+    <form method="POST" action="{{ url_for('royalties_generate') }}">
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Mes</label>
+          <select name="period_month">
+            {% for m in range(1,13) %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Año</label>
+          <input type="number" name="period_year" value="{{ now_year }}" min="2000" max="2100">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Generar regalías</button>
+    </form>
+  </div>
+
+  <div>
+    <!-- Summary stats -->
+    <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">
+      {% set pending_total = payments | selectattr('status','eq','pending') | sum(attribute='amount') %}
+      {% set paid_total = payments | selectattr('status','eq','paid') | sum(attribute='amount') %}
+      <div class="card stat-card">
+        <div class="card-title">Pendientes</div>
+        <div class="stat-number text-danger">${{ '%.2f'|format(pending_total) }}</div>
+      </div>
+      <div class="card stat-card">
+        <div class="card-title">Pagadas</div>
+        <div class="stat-number text-success">${{ '%.2f'|format(paid_total) }}</div>
+      </div>
+    </div>
+
+    <!-- Filter -->
+    <div style="margin-bottom:12px">
+      <input type="text" id="filter-input" placeholder="Filtrar por autor o período…" style="max-width:300px">
+    </div>
+
+    {% if payments %}
+    <div class="table-wrapper">
+      <table id="royalties-table">
+        <thead>
+          <tr>
+            <th>Autor</th>
+            <th>Libro</th>
+            <th>Período</th>
+            <th>Monto</th>
+            <th>Estado</th>
+            <th>Pagado el</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rp in payments %}
+          <tr id="rp-{{ rp.id }}">
+            <td><a href="{{ url_for('author_detail', author_id=rp.author_id) }}" style="color:var(--primary)">{{ rp.author_name }}</a></td>
+            <td>{{ rp.book_title }}</td>
+            <td>{{ rp.period }}</td>
+            <td>${{ '%.2f'|format(rp.amount) }}</td>
+            <td><span class="badge badge-{{ rp.status }}" id="badge-{{ rp.id }}">{{ rp.status }}</span></td>
+            <td id="paid-at-{{ rp.id }}">{{ rp.paid_at or '—' }}</td>
+            <td style="display:flex;gap:4px">
+              {% if rp.status == 'pending' %}
+              <button class="btn btn-success btn-xs" onclick="markPaid({{ rp.id }})">Marcar pagado</button>
+              {% endif %}
+              <form method="POST" action="{{ url_for('royalties_delete', payment_id=rp.id) }}"
+                    onsubmit="return confirm('¿Eliminar esta regalía?')">
+                <button type="submit" class="btn btn-danger btn-xs">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card"><p class="empty-state">No hay regalías generadas todavía. Selecciona un período y haz clic en «Generar regalías».</p></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.getElementById('filter-input')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#royalties-table tbody tr').forEach(tr => {
+    const text = tr.cells[0].textContent.toLowerCase() + ' ' + tr.cells[2].textContent.toLowerCase();
+    tr.style.display = text.includes(q) ? '' : 'none';
+  });
+});
+
+async function markPaid(id) {
+  const res = await fetch(`/royalties/${id}/mark-paid`, {method: 'POST'});
+  if (res.ok) {
+    const badge = document.getElementById('badge-' + id);
+    badge.className = 'badge badge-paid';
+    badge.textContent = 'paid';
+    const row = document.getElementById('rp-' + id);
+    const actionsCell = row.cells[6];
+    const paidBtn = actionsCell.querySelector('button.btn-success');
+    if (paidBtn) paidBtn.remove();
+    document.getElementById('paid-at-' + id).textContent = new Date().toLocaleString();
+  }
+}
+</script>
+{% endblock %}

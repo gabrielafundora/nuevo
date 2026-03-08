@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Gastos — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Gastos</h1>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Registrar gasto</div>
+    <form method="POST" action="{{ url_for('expenses_new') }}">
+      <div class="form-group mb-16">
+        <label>Categoría *</label>
+        <select name="category_id" required>
+          <option value="">— Seleccionar —</option>
+          {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group mb-16">
+        <label>Libro asociado (opcional)</label>
+        <select name="book_id">
+          <option value="">— Gasto general —</option>
+          {% for b in books %}
+          <option value="{{ b.id }}">{{ b.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group mb-16">
+        <label>Monto ($) *</label>
+        <input type="number" name="amount" step="0.01" min="0.01" required>
+      </div>
+      <div class="form-group mb-16">
+        <label>Fecha *</label>
+        <input type="date" name="expense_date" value="{{ today }}">
+      </div>
+      <div class="form-group mb-16">
+        <label>Descripción</label>
+        <textarea name="description"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Registrar gasto</button>
+    </form>
+  </div>
+
+  <div>
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+      <input type="text" id="filter-input" placeholder="Filtrar…" style="max-width:280px">
+    </div>
+    {% if entries %}
+    <div class="table-wrapper">
+      <table id="expenses-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Categoría</th>
+            <th>Libro</th>
+            <th>Descripción</th>
+            <th>Monto</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.expense_date }}</td>
+            <td>{{ e.category_name }}</td>
+            <td>{{ e.book_title or '—' }}</td>
+            <td>{{ e.description or '—' }}</td>
+            <td>${{ '%.2f'|format(e.amount) }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('expenses_delete', expense_id=e.id) }}"
+                    onsubmit="return confirm('¿Eliminar este gasto?')">
+                <button type="submit" class="btn btn-danger btn-xs">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card"><p class="empty-state">No hay gastos registrados todavía.</p></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.getElementById('filter-input')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#expenses-table tbody tr').forEach(tr => {
+    const text = [...tr.cells].slice(0,4).map(c => c.textContent.toLowerCase()).join(' ');
+    tr.style.display = text.includes(q) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}

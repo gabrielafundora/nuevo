@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Inventario — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Inventario</h1>
+</div>
+
+<div class="two-panel">
+  <!-- New print run form -->
+  <div class="card">
+    <div class="section-title">Registrar tirada de impresión</div>
+    <form method="POST" action="{{ url_for('inventory_print_run_new') }}">
+      <div class="form-group mb-16">
+        <label>Libro *</label>
+        <select name="book_id" required>
+          <option value="">— Seleccionar —</option>
+          {% for b in books %}
+          <option value="{{ b.id }}">{{ b.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Cantidad *</label>
+          <input type="number" name="quantity" min="1" required>
+        </div>
+        <div class="form-group">
+          <label>Costo por unidad ($)</label>
+          <input type="number" name="cost_per_unit" step="0.01" min="0" value="0">
+        </div>
+      </div>
+      <div class="form-group mb-16">
+        <label>Fecha</label>
+        <input type="date" name="print_date">
+      </div>
+      <div class="form-group mb-16">
+        <label>Proveedor</label>
+        <input type="text" name="supplier">
+      </div>
+      <div class="form-group mb-16">
+        <label>Notas</label>
+        <textarea name="notes"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Registrar tirada</button>
+    </form>
+  </div>
+
+  <div>
+    <!-- Stock overview -->
+    <div class="card mb-16">
+      <div class="section-title">Stock actual</div>
+      {% if items %}
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Libro</th>
+              <th>Formato</th>
+              <th>Stock físico</th>
+              <th>Vendidos fís.</th>
+              <th>Vendidos dig.</th>
+              <th>Valor stock</th>
+              <th>Ajustar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td><a href="{{ url_for('catalog_detail', book_id=item.book_id) }}" style="color:var(--primary)">{{ item.title }}</a></td>
+              <td><span class="badge badge-{{ item.format }}">{{ item.format }}</span></td>
+              <td>{{ item.units_physical_in_stock or 0 }}</td>
+              <td>{{ item.units_physical_sold or 0 }}</td>
+              <td>{{ item.units_digital_sold or 0 }}</td>
+              <td>${{ '%.2f'|format((item.units_physical_in_stock or 0) * (item.cover_price_physical or 0)) }}</td>
+              <td>
+                <form method="POST" action="{{ url_for('inventory_adjust', book_id=item.book_id) }}"
+                      style="display:flex;gap:4px;align-items:center">
+                  <input type="number" name="adjustment" placeholder="±" style="width:60px;padding:4px">
+                  <button type="submit" class="btn btn-outline btn-xs">OK</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty-state">No hay libros en el catálogo todavía.</p>
+      {% endif %}
+    </div>
+
+    <!-- Recent print runs -->
+    <div class="card">
+      <div class="section-title">Últimas tiradas de impresión</div>
+      {% if print_runs %}
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Libro</th><th>Fecha</th><th>Cantidad</th><th>Costo/ud</th><th>Total</th><th>Proveedor</th></tr></thead>
+          <tbody>
+            {% for pr in print_runs %}
+            <tr>
+              <td>{{ pr.book_title }}</td>
+              <td>{{ pr.print_date or '—' }}</td>
+              <td>{{ pr.quantity }}</td>
+              <td>${{ '%.2f'|format(pr.cost_per_unit) }}</td>
+              <td>${{ '%.2f'|format(pr.total_cost) }}</td>
+              <td>{{ pr.supplier or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty-state">No hay tiradas registradas.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

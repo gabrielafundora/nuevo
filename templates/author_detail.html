@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ author.name }} — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('authors') }}" class="text-muted" style="font-size:12px">← Autores</a>
+    <h1 class="page-title">{{ author.name }}</h1>
+  </div>
+  <form method="POST" action="{{ url_for('authors_delete', author_id=author.id) }}"
+        onsubmit="return confirm('¿Eliminar este autor?')">
+    <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+  </form>
+</div>
+
+<div class="card mb-16">
+  <div class="section-title">Información
+    <button class="btn btn-outline btn-xs" style="float:right" onclick="showEdit()">Editar</button>
+  </div>
+  <div class="detail-grid" id="info-view">
+    <div><div class="detail-label">Email</div><div class="detail-value">{{ author.email or '—' }}</div></div>
+    <div><div class="detail-label">Teléfono</div><div class="detail-value">{{ author.phone or '—' }}</div></div>
+    <div><div class="detail-label">Dirección</div><div class="detail-value">{{ author.address or '—' }}</div></div>
+    <div><div class="detail-label">Registrado</div><div class="detail-value">{{ author.created_at }}</div></div>
+  </div>
+  {% if author.bio %}<p style="margin-top:8px;font-size:13px">{{ author.bio }}</p>{% endif %}
+  <form id="edit-form" style="display:none" onsubmit="submitEdit(event, {{ author.id }})">
+    <div class="form-grid mb-16">
+      <div class="form-group"><label>Nombre</label><input name="name" value="{{ author.name }}" required></div>
+      <div class="form-group"><label>Email</label><input type="email" name="email" value="{{ author.email or '' }}"></div>
+      <div class="form-group"><label>Teléfono</label><input type="tel" name="phone" value="{{ author.phone or '' }}"></div>
+      <div class="form-group"><label>Dirección</label><input name="address" value="{{ author.address or '' }}"></div>
+    </div>
+    <div class="form-group mb-16">
+      <label>Biografía</label>
+      <textarea name="bio">{{ author.bio or '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+    <button type="button" class="btn btn-sm" onclick="cancelEdit()">Cancelar</button>
+  </form>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Libros ({{ books|length }})</div>
+    {% if books %}
+    <table style="width:100%">
+      <thead><tr><th style="padding:6px 0">Título</th><th>Rol</th><th>% Regalía</th></tr></thead>
+      <tbody>
+        {% for b in books %}
+        <tr>
+          <td style="padding:6px 0"><a href="{{ url_for('catalog_detail', book_id=b.id) }}" style="color:var(--primary)">{{ b.title }}</a></td>
+          <td>{{ b.role }}</td>
+          <td>{{ '%.1f'|format(b.royalty_rate) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty-state">Sin libros asignados.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <div class="section-title">Historial de regalías</div>
+    {% if royalties %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Período</th><th>Libro</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+          {% for rp in royalties %}
+          <tr>
+            <td>{{ rp.period }}</td>
+            <td>{{ rp.book_title }}</td>
+            <td>${{ '%.2f'|format(rp.amount) }}</td>
+            <td><span class="badge badge-{{ rp.status }}">{{ rp.status }}</span></td>
+            <td>
+              {% if rp.status == 'pending' %}
+              <button class="btn btn-success btn-xs" onclick="markPaid({{ rp.id }}, this)">Marcar pagado</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<p class="empty-state">Sin regalías generadas.</p>{% endif %}
+  </div>
+</div>
+
+<script>
+function showEdit() {
+  document.getElementById('info-view').style.display = 'none';
+  document.getElementById('edit-form').style.display = 'block';
+}
+function cancelEdit() {
+  document.getElementById('info-view').style.display = '';
+  document.getElementById('edit-form').style.display = 'none';
+}
+async function submitEdit(e, id) {
+  e.preventDefault();
+  const data = {};
+  new FormData(e.target).forEach((v, k) => data[k] = v);
+  const res = await fetch(`/authors/${id}/edit`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  if (res.ok) location.reload();
+}
+async function markPaid(id, btn) {
+  const res = await fetch(`/royalties/${id}/mark-paid`, {method: 'POST'});
+  if (res.ok) {
+    btn.closest('tr').querySelector('.badge').className = 'badge badge-paid';
+    btn.closest('tr').querySelector('.badge').textContent = 'paid';
+    btn.remove();
+  }
+}
+</script>
+{% endblock %}

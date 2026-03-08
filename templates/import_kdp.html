@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Importar KDP — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Importar datos de Amazon KDP</h1>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Subir reporte CSV de KDP</div>
+    <div class="card" style="background:#fffbeb;border-color:#fde68a;margin-bottom:16px">
+      <strong style="font-size:13px">ℹ️ ¿Cómo obtener el CSV?</strong>
+      <ol style="font-size:12px;margin-top:8px;padding-left:16px;line-height:1.8">
+        <li>Ingresa a <strong>kdpreports.amazon.com</strong></li>
+        <li>Selecciona «Sales &amp; Royalties»</li>
+        <li>Filtra por marketplace, período, etc.</li>
+        <li>Haz clic en <strong>Download report</strong></li>
+        <li>Sube el archivo .csv aquí</li>
+      </ol>
+    </div>
+
+    <form method="POST" action="{{ url_for('import_kdp') }}" enctype="multipart/form-data">
+      <div class="form-group mb-16">
+        <label>Archivo CSV (.csv, máx 5 MB)</label>
+        <input type="file" name="csv_file" accept=".csv" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Importar</button>
+    </form>
+
+    <div style="margin-top:24px">
+      <div class="section-title">Columnas esperadas del CSV</div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Columna KDP</th><th>Campo en el sistema</th></tr></thead>
+          <tbody>
+            <tr><td>Title</td><td>Título del libro</td></tr>
+            <tr><td>Author</td><td>Nombre del autor</td></tr>
+            <tr><td>ASIN</td><td>ISBN / identificador</td></tr>
+            <tr><td>Transaction Month</td><td>Período (mes/año)</td></tr>
+            <tr><td>Net Units Sold</td><td>Unidades vendidas</td></tr>
+            <tr><td>Royalty</td><td>Ingreso por regalía</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-muted" style="font-size:11px;margin-top:8px">
+        Los libros y autores nuevos se crean automáticamente.
+        Las entradas duplicadas se omiten sin error.
+      </p>
+    </div>
+  </div>
+
+  <div>
+    {% if result %}
+    <div class="card mb-16">
+      <div class="section-title">Resultado de la importación</div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="card stat-card">
+          <div class="card-title">Procesadas</div>
+          <div class="stat-number">{{ result.processed }}</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-title">Importadas</div>
+          <div class="stat-number text-success">{{ result.imported }}</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-title">Omitidas</div>
+          <div class="stat-number text-muted">{{ result.skipped }}</div>
+        </div>
+      </div>
+    </div>
+
+    {% if errors %}
+    <div class="card">
+      <div class="section-title text-danger">Advertencias ({{ errors|length }})</div>
+      <ul style="font-size:12px;padding-left:16px;line-height:1.8">
+        {% for e in errors %}
+        <li>{{ e }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <a href="{{ url_for('revenue') }}" class="btn btn-outline">Ver ventas importadas</a>
+      <a href="{{ url_for('catalog') }}" class="btn btn-outline">Ver catálogo</a>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="section-title">Información sobre Amazon KDP</div>
+      <p style="font-size:13px;line-height:1.7;color:var(--text-muted)">
+        Amazon KDP <strong>no ofrece una API pública</strong> para acceder a datos de ventas
+        directamente. La única forma oficial y compatible con los términos de servicio es
+        descargar los reportes CSV desde el panel de KDP e importarlos aquí.
+      </p>
+      <p style="font-size:13px;line-height:1.7;color:var(--text-muted);margin-top:12px">
+        Una vez importados, los datos se integran con el catálogo, el inventario
+        digital y el sistema de regalías automáticamente.
+      </p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

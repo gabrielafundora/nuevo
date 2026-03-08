@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Reportes — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Reportes financieros</h1>
+  <div style="display:flex;gap:8px;align-items:center">
+    <label style="font-size:13px;font-weight:600">Año:</label>
+    <select id="year-select" onchange="loadReports()">
+      <option value="">Todos</option>
+    </select>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('pl')">P&L por mes</button>
+  <button class="tab-btn" onclick="showTab('books')">Rentabilidad por libro</button>
+  <button class="tab-btn" onclick="showTab('royalties')">Resumen regalías</button>
+</div>
+
+<!-- P&L tab -->
+<div class="tab-panel active" id="tab-pl">
+  <div class="card mb-16">
+    <div class="card-title">Ingresos vs Gastos mensuales</div>
+    <div class="chart-container"><canvas id="chart-pl"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="section-title">Detalle mensual</div>
+    <div class="table-wrapper">
+      <table id="pl-table">
+        <thead><tr><th>Período</th><th>Ingresos</th><th>Gastos</th><th>Beneficio neto</th></tr></thead>
+        <tbody id="pl-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Books profitability tab -->
+<div class="tab-panel" id="tab-books">
+  <div class="card">
+    <div class="section-title">Rentabilidad por libro</div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Libro</th>
+            <th>Ingresos</th>
+            <th>Gastos</th>
+            <th>Regalías pagadas</th>
+            <th>Beneficio neto</th>
+            <th>Margen</th>
+          </tr>
+        </thead>
+        <tbody id="books-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Royalties summary tab -->
+<div class="tab-panel" id="tab-royalties">
+  <div class="two-panel">
+    <div class="card">
+      <div class="section-title">Regalías por autor</div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Autor</th><th>Pendientes</th><th>Pagadas</th><th>Total</th></tr></thead>
+          <tbody id="royalties-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Regalías pendientes vs pagadas</div>
+      <div class="chart-container"><canvas id="chart-royalties"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let plChart = null, royaltiesChart = null;
+
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function fmt(n) { return '$' + n.toFixed(2); }
+
+async function loadReports() {
+  const year = document.getElementById('year-select').value;
+  const url = year ? `/api/reports?year=${year}` : '/api/reports';
+  const data = await fetch(url).then(r => r.json());
+
+  // Populate year selector (first load)
+  const sel = document.getElementById('year-select');
+  if (sel.options.length === 1 && data.available_years.length > 0) {
+    data.available_years.forEach(y => {
+      const opt = document.createElement('option');
+      opt.value = y; opt.textContent = y;
+      sel.appendChild(opt);
+    });
+  }
+
+  // Build monthly P&L (merge revenue + expenses by year-month)
+  const monthMap = {};
+  data.monthly_pl.forEach(r => {
+    const k = `${r.year}-${String(r.month).padStart(2,'0')}`;
+    if (!monthMap[k]) monthMap[k] = {rev:0, exp:0};
+    monthMap[k].rev += r.revenue;
+  });
+  data.monthly_expenses.forEach(r => {
+    const k = `${r.year}-${String(r.month).padStart(2,'0')}`;
+    if (!monthMap[k]) monthMap[k] = {rev:0, exp:0};
+    monthMap[k].exp += r.expenses;
+  });
+  const months = Object.keys(monthMap).sort();
+  const revData = months.map(k => monthMap[k].rev);
+  const expData = months.map(k => monthMap[k].exp);
+  const netData = months.map(k => monthMap[k].rev - monthMap[k].exp);
+
+  // P&L chart
+  if (plChart) plChart.destroy();
+  plChart = new Chart(document.getElementById('chart-pl'), {
+    type: 'bar',
+    data: {
+      labels: months,
+      datasets: [
+        {label: 'Ingresos', data: revData, backgroundColor: 'rgba(37,99,235,.7)'},
+        {label: 'Gastos',   data: expData, backgroundColor: 'rgba(220,38,38,.5)'},
+        {label: 'Neto',     data: netData, type: 'line',
+         borderColor: 'rgba(22,163,74,1)', backgroundColor: 'transparent',
+         borderWidth: 2, pointRadius: 3}
+      ]
+    },
+    options: {responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'top'}}}
+  });
+
+  // P&L table
+  const plTbody = document.getElementById('pl-tbody');
+  plTbody.innerHTML = months.map(k => {
+    const net = monthMap[k].rev - monthMap[k].exp;
+    return `<tr>
+      <td>${k}</td>
+      <td>${fmt(monthMap[k].rev)}</td>
+      <td>${fmt(monthMap[k].exp)}</td>
+      <td class="${net>=0?'text-success':'text-danger'}">${fmt(net)}</td>
+    </tr>`;
+  }).join('');
+
+  // Books profitability table
+  document.getElementById('books-tbody').innerHTML = data.book_profitability.map(b => {
+    const margin = b.revenue > 0 ? ((b.net / b.revenue)*100).toFixed(1) : '—';
+    return `<tr>
+      <td><a href="/catalog/${b.id}" style="color:var(--primary)">${b.title}</a></td>
+      <td>${fmt(b.revenue)}</td>
+      <td>${fmt(b.expenses)}</td>
+      <td>${fmt(b.royalties_paid)}</td>
+      <td class="${b.net>=0?'text-success':'text-danger'}">${fmt(b.net)}</td>
+      <td>${margin}${margin!=='—'?'%':''}</td>
+    </tr>`;
+  }).join('');
+
+  // Royalties table
+  document.getElementById('royalties-tbody').innerHTML = data.royalty_summary.map(r => {
+    return `<tr>
+      <td>${r.author}</td>
+      <td class="${r.pending>0?'text-danger':''}">${fmt(r.pending)}</td>
+      <td class="text-success">${fmt(r.paid)}</td>
+      <td>${fmt(r.pending+r.paid)}</td>
+    </tr>`;
+  }).join('');
+
+  // Royalties doughnut
+  if (royaltiesChart) royaltiesChart.destroy();
+  const totalPending = data.royalty_summary.reduce((s,r)=>s+r.pending,0);
+  const totalPaid    = data.royalty_summary.reduce((s,r)=>s+r.paid,0);
+  royaltiesChart = new Chart(document.getElementById('chart-royalties'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Pendientes','Pagadas'],
+      datasets: [{data:[totalPending,totalPaid],
+        backgroundColor:['rgba(217,119,6,.7)','rgba(22,163,74,.7)']}]
+    },
+    options: {responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom'}}}
+  });
+}
+
+loadReports();
+</script>
+{% endblock %}

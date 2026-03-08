@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Ventas — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Ventas e ingresos</h1>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Registrar venta</div>
+    <form method="POST" action="{{ url_for('revenue_new') }}">
+      <div class="form-group mb-16">
+        <label>Libro *</label>
+        <select name="book_id" required>
+          <option value="">— Seleccionar —</option>
+          {% for b in books %}
+          <option value="{{ b.id }}">{{ b.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Canal</label>
+          <select name="channel">
+            <option value="direct">Venta directa</option>
+            <option value="kdp">Amazon KDP</option>
+            <option value="distributor">Distribuidor</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Formato</label>
+          <select name="format">
+            <option value="digital">Digital</option>
+            <option value="physical">Físico</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Mes *</label>
+          <select name="period_month">
+            {% for m in range(1,13) %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Año *</label>
+          <input type="number" name="period_year" value="{{ now_year }}" min="2000" max="2100">
+        </div>
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Unidades vendidas</label>
+          <input type="number" name="units_sold" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label>Ingreso ($)</label>
+          <input type="number" name="revenue_amount" step="0.01" min="0" value="0">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Registrar</button>
+    </form>
+  </div>
+
+  <div>
+    <!-- Filter -->
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+      <input type="text" id="filter-input" placeholder="Filtrar por libro…" style="max-width:280px">
+    </div>
+    {% if entries %}
+    <div class="table-wrapper">
+      <table id="revenue-table">
+        <thead>
+          <tr>
+            <th>Libro</th>
+            <th>Canal</th>
+            <th>Formato</th>
+            <th>Período</th>
+            <th>Unidades</th>
+            <th>Ingreso</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.book_title }}</td>
+            <td><span class="badge badge-{{ e.channel }}">{{ e.channel }}</span></td>
+            <td><span class="badge badge-{{ e.format }}">{{ e.format }}</span></td>
+            <td>{{ '%02d'|format(e.period_month) }}/{{ e.period_year }}</td>
+            <td>{{ e.units_sold }}</td>
+            <td>${{ '%.2f'|format(e.revenue_amount) }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('revenue_delete', entry_id=e.id) }}"
+                    onsubmit="return confirm('¿Eliminar esta entrada?')">
+                <button type="submit" class="btn btn-danger btn-xs">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card"><p class="empty-state">No hay entradas de ventas registradas.</p></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.getElementById('filter-input')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#revenue-table tbody tr').forEach(tr => {
+    tr.style.display = tr.cells[0].textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}

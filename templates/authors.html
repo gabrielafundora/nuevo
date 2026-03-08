@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Autores — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Autores</h1>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Agregar autor</div>
+    <form method="POST" action="{{ url_for('authors_new') }}">
+      <div class="form-group mb-16">
+        <label>Nombre *</label>
+        <input type="text" name="name" required>
+      </div>
+      <div class="form-group mb-16">
+        <label>Email</label>
+        <input type="email" name="email">
+      </div>
+      <div class="form-group mb-16">
+        <label>Teléfono</label>
+        <input type="tel" name="phone">
+      </div>
+      <div class="form-group mb-16">
+        <label>Dirección</label>
+        <input type="text" name="address">
+      </div>
+      <div class="form-group mb-16">
+        <label>Biografía</label>
+        <textarea name="bio"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Agregar autor</button>
+    </form>
+  </div>
+
+  <div>
+    {% if authors %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Email</th>
+            <th>Libros</th>
+            <th>Regalías pendientes</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in authors %}
+          <tr>
+            <td><a href="{{ url_for('author_detail', author_id=a.id) }}" style="color:var(--primary);font-weight:500">{{ a.name }}</a></td>
+            <td>{{ a.email or '—' }}</td>
+            <td>{{ a.book_count }}</td>
+            <td class="{% if a.pending_royalties > 0 %}text-danger{% endif %}">
+              ${{ '%.2f'|format(a.pending_royalties) }}
+            </td>
+            <td>
+              <a href="{{ url_for('author_detail', author_id=a.id) }}" class="btn btn-outline btn-xs">Ver</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card"><p class="empty-state">No hay autores registrados todavía.</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

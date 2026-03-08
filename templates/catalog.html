@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Catálogo — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Catálogo de libros</h1>
+</div>
+
+<div class="two-panel">
+  <!-- Add book form -->
+  <div class="card">
+    <div class="section-title">Agregar libro</div>
+    <form method="POST" action="{{ url_for('catalog_new') }}">
+      <div class="form-group mb-16">
+        <label>Título *</label>
+        <input type="text" name="title" required>
+      </div>
+      <div class="form-group mb-16">
+        <label>Editorial *</label>
+        <select name="publisher_id" required>
+          <option value="">— Seleccionar —</option>
+          {% for p in publishers %}
+          <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+        {% if not publishers %}
+        <small class="text-muted">Primero <a href="{{ url_for('publishers') }}">crea una editorial</a>.</small>
+        {% endif %}
+      </div>
+      <div class="form-group mb-16">
+        <label>ISBN / ASIN</label>
+        <input type="text" name="isbn">
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Género</label>
+          <input type="text" name="genre">
+        </div>
+        <div class="form-group">
+          <label>Idioma</label>
+          <input type="text" name="language" value="Spanish">
+        </div>
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Fecha publicación</label>
+          <input type="date" name="publication_date">
+        </div>
+        <div class="form-group">
+          <label>Formato</label>
+          <select name="format">
+            <option value="both">Digital + Físico</option>
+            <option value="digital">Solo digital</option>
+            <option value="physical">Solo físico</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid mb-16">
+        <div class="form-group">
+          <label>Precio digital ($)</label>
+          <input type="number" name="cover_price_digital" step="0.01" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label>Precio físico ($)</label>
+          <input type="number" name="cover_price_physical" step="0.01" min="0" value="0">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Agregar libro</button>
+    </form>
+  </div>
+
+  <!-- Book list -->
+  <div>
+    {% if books %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Título</th>
+            <th>Autores</th>
+            <th>Editorial</th>
+            <th>Formato</th>
+            <th>ISBN</th>
+            <th>Precio dig.</th>
+            <th>Precio fís.</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in books %}
+          <tr>
+            <td><a href="{{ url_for('catalog_detail', book_id=b.id) }}" style="color:var(--primary);font-weight:500">{{ b.title }}</a></td>
+            <td>{{ b.authors or '—' }}</td>
+            <td>{{ b.publisher_name }}</td>
+            <td><span class="badge badge-{{ b.format }}">{{ b.format }}</span></td>
+            <td>{{ b.isbn or '—' }}</td>
+            <td>${{ '%.2f'|format(b.cover_price_digital or 0) }}</td>
+            <td>${{ '%.2f'|format(b.cover_price_physical or 0) }}</td>
+            <td>
+              <a href="{{ url_for('catalog_detail', book_id=b.id) }}" class="btn btn-outline btn-xs">Ver</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card"><p class="empty-state">No hay libros en el catálogo todavía.</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

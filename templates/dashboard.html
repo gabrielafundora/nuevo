@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Editorial Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Dashboard</h1>
+  <span class="text-muted" id="last-updated"></span>
+</div>
+
+<div class="stats-grid" id="stats-grid">
+  <div class="card stat-card"><div class="card-title">Ingresos (año actual)</div><div class="stat-number" id="s-rev-year">—</div></div>
+  <div class="card stat-card"><div class="card-title">Gastos (año actual)</div><div class="stat-number" id="s-exp-year">—</div></div>
+  <div class="card stat-card"><div class="card-title">Beneficio neto (año)</div><div class="stat-number" id="s-net-year">—</div></div>
+  <div class="card stat-card"><div class="card-title">Regalías pendientes</div><div class="stat-number" id="s-royalties">—</div></div>
+  <div class="card stat-card"><div class="card-title">Libros en catálogo</div><div class="stat-number" id="s-books">—</div></div>
+  <div class="card stat-card"><div class="card-title">Valor stock físico</div><div class="stat-number" id="s-stock">—</div></div>
+</div>
+
+<div class="charts-grid">
+  <div class="card">
+    <div class="card-title">Ingresos vs Gastos (últimos 12 meses)</div>
+    <div class="chart-container"><canvas id="chart-monthly"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Gastos por categoría</div>
+    <div class="chart-container"><canvas id="chart-expenses"></canvas></div>
+  </div>
+</div>
+
+<div class="two-panel">
+  <div class="card">
+    <div class="section-title">Top 5 libros por ingreso</div>
+    <div id="top-books-container"><p class="empty-state">Cargando…</p></div>
+  </div>
+  <div class="card">
+    <div class="section-title">Accesos rápidos</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <a href="{{ url_for('catalog_new') if false else url_for('catalog') }}" class="btn btn-outline">+ Nuevo libro</a>
+      <a href="{{ url_for('authors') }}" class="btn btn-outline">+ Nuevo autor</a>
+      <a href="{{ url_for('revenue') }}" class="btn btn-outline">+ Registrar venta</a>
+      <a href="{{ url_for('expenses') }}" class="btn btn-outline">+ Registrar gasto</a>
+      <a href="{{ url_for('import_kdp') }}" class="btn btn-outline">⬆ Importar KDP CSV</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
